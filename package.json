@@ -1,0 +1,14 @@
+{
+  "name": "surge-sub-converter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Convert universal subscriptions into Surge proxy format with configurable Trojan-WS patching.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
