@@ -31,6 +31,8 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
+In cloud environments, the app follows `PORT` and falls back to `8080`.
+
 ## API Example
 
 ```bash
