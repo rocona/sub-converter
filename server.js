@@ -680,6 +680,32 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && requestUrl.pathname === "/api/default-preview") {
+      if (!defaultSubscriptionUrl) {
+        json(res, 500, { error: "Default subscription is not configured on the server." });
+        return;
+      }
+
+      const options = getDefaultOptions();
+      const sourceText = await fetchSubscription(options.subscriptionUrl);
+      const converted = convertSubscription(sourceText, options);
+      json(res, 200, {
+        ...converted,
+        stats: {
+          total: converted.proxies.length,
+          inputTotal: converted.sourceStats.inputTotal,
+          skippedMetaEntries: converted.sourceStats.skippedMetaEntries,
+          unsupportedLines: converted.sourceStats.unsupportedLines,
+          vmess: converted.proxies.filter((item) => item.type === "vmess").length,
+          ss: converted.proxies.filter((item) => item.type === "ss").length,
+          trojan: converted.proxies.filter((item) => item.type === "trojan").length,
+          hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
+        },
+        generatedUrl: buildDefaultPublicSubscriptionUrl(req)
+      });
+      return;
+    }
+
     if (req.method === "GET" && requestUrl.pathname === "/sub/default") {
       if (!defaultSubscriptionUrl) {
         text(res, 500, "# Error\n# Default subscription is not configured on the server.\n");

@@ -39,7 +39,7 @@ body {
 
 .shell {
   position: relative;
-  width: min(100vw - 32px, 760px);
+  width: min(100vw - 32px, 1040px);
   margin: 0 auto;
   padding: 36px 0 48px;
 }
@@ -47,7 +47,12 @@ body {
 .compact-shell {
   display: grid;
   place-items: center;
-  min-height: 100vh;
+}
+
+.page-stack {
+  width: 100%;
+  display: grid;
+  gap: 24px;
 }
 
 .panel {
@@ -59,7 +64,8 @@ body {
   box-shadow: var(--shadow);
 }
 
-.self-panel {
+.self-panel,
+.output-panel {
   padding: 32px;
 }
 
@@ -78,11 +84,16 @@ h1 {
   letter-spacing: -0.04em;
 }
 
+.summary,
+.section-head p,
+.status-text {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .summary {
   margin: 18px 0 0;
-  color: var(--muted);
   font-size: 17px;
-  line-height: 1.7;
 }
 
 .simple-stack {
@@ -119,11 +130,19 @@ input {
 
 .status-text {
   margin: 18px 0 0;
-  color: var(--muted);
-  line-height: 1.6;
 }
 
-.actions {
+.section-head {
+  margin-bottom: 16px;
+}
+
+.section-head h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.actions,
+.toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -154,15 +173,78 @@ button.ghost {
   border: 1px solid rgba(116, 77, 37, 0.12);
 }
 
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.metric-card {
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: rgba(255, 248, 237, 0.92);
+  border: 1px solid rgba(116, 77, 37, 0.12);
+}
+
+.metric-card span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+}
+
+.result-block {
+  margin: 0;
+  min-height: 420px;
+  padding: 18px;
+  overflow: auto;
+  border-radius: 22px;
+  border: 1px solid rgba(116, 77, 37, 0.12);
+  background: linear-gradient(180deg, #22170f, #2f2115);
+  color: #f7e8d5;
+  font-family: "SFMono-Regular", "Menlo", monospace;
+  line-height: 1.55;
+}
+
+.warnings {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(189, 75, 42, 0.08);
+  border: 1px solid rgba(189, 75, 42, 0.16);
+}
+
+.warnings.hidden {
+  display: none;
+}
+
+.warnings ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 @media (max-width: 720px) {
   .shell {
-    width: min(100vw - 20px, 760px);
+    width: min(100vw - 20px, 1040px);
     padding-top: 20px;
     padding-bottom: 20px;
   }
 
-  .self-panel {
+  .self-panel,
+  .output-panel {
     padding: 24px;
     border-radius: 24px;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr 1fr;
   }
 }
