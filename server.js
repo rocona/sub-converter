@@ -116,6 +116,54 @@ function queryValue(searchParams, key) {
   return value == null ? "" : value;
 }
 
+function firstDefinedValue(values) {
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+}
+
+function toBooleanWithDefault(value, defaultValue) {
+  const parsed = parseMaybeBoolean(value);
+  return parsed === null ? defaultValue : parsed;
+}
+
+function normalizePortHopping(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/,/g, ";");
+}
+
+function buildOptions(source, mode = "body") {
+  const queryMode = mode === "query";
+
+  return {
+    subscriptionUrl: firstDefinedValue([source.subscriptionUrl, source.url]),
+    rawContent: firstDefinedValue([source.rawContent]),
+    forceTrojanWs: queryMode
+      ? toBooleanWithDefault(source.forceTrojanWs, true)
+      : Boolean(source.forceTrojanWs),
+    trojanWsPath: firstDefinedValue([source.trojanWsPath, source.wsPath]) || "/images",
+    trojanWsHost: firstDefinedValue([source.trojanWsHost, source.wsHost]),
+    trojanWsHostMode: firstDefinedValue([source.trojanWsHostMode, source.wsHostMode]) || "peer",
+    trojanSniOverride: firstDefinedValue([source.trojanSniOverride]),
+    keepUnsupported: queryMode
+      ? toBooleanWithDefault(source.keepUnsupported, false)
+      : Boolean(source.keepUnsupported),
+    skipMetaEntries: queryMode
+      ? toBooleanWithDefault(source.skipMetaEntries, true)
+      : source.skipMetaEntries !== false,
+    enableUdpRelay: queryMode
+      ? toBooleanWithDefault(source.enableUdpRelay, true)
+      : source.enableUdpRelay !== false
+  };
+}
+
 function parseVmessUri(line, options) {
   const payload = line.slice(8).trim();
   const json = JSON.parse(decodeBase64Url(payload));
@@ -287,12 +335,79 @@ function parseTrojanUri(line, options) {
   };
 }
 
+function parseHysteria2Uri(line) {
+  const normalizedLine = line.indexOf("hy2://") === 0
+    ? `hysteria2://${line.slice(6)}`
+    : line;
+  const url = new URL(normalizedLine);
+  const searchParams = url.searchParams;
+  const name = decodeURIComponent((url.hash || "").replace(/^#/, "")) || `${url.hostname}:${url.port}`;
+  const host = url.hostname;
+  const proxyPort = Number(url.port);
+  const password = decodeURIComponent(url.username || url.password || "");
+  const params = [];
+
+  if (!password) {
+    throw new Error("Missing Hysteria2 password");
+  }
+
+  params.push(`password=${encodeSurgeValue(password)}`);
+
+  const sni = firstDefinedValue([queryValue(searchParams, "sni"), queryValue(searchParams, "peer")]);
+  if (sni) {
+    params.push(`sni=${encodeSurgeValue(sni)}`);
+  }
+
+  const skipCertVerify = parseMaybeBoolean(firstDefinedValue([
+    queryValue(searchParams, "skip-cert-verify"),
+    queryValue(searchParams, "allowInsecure"),
+    queryValue(searchParams, "insecure")
+  ]));
+  if (skipCertVerify !== null) {
+    params.push(`skip-cert-verify=${skipCertVerify}`);
+  }
+
+  const downloadBandwidth = firstDefinedValue([
+    queryValue(searchParams, "download-bandwidth"),
+    queryValue(searchParams, "downmbps"),
+    queryValue(searchParams, "down-mbps")
+  ]);
+  if (downloadBandwidth) {
+    params.push(`download-bandwidth=${encodeSurgeValue(downloadBandwidth)}`);
+  }
+
+  const portHopping = normalizePortHopping(firstDefinedValue([
+    queryValue(searchParams, "port-hopping"),
+    queryValue(searchParams, "mport"),
+    queryValue(searchParams, "ports")
+  ]));
+  if (portHopping) {
+    params.push(`port-hopping=${encodeSurgeValue(portHopping)}`);
+  }
+
+  const portHoppingInterval = firstDefinedValue([
+    queryValue(searchParams, "port-hopping-interval"),
+    queryValue(searchParams, "mportInterval")
+  ]);
+  if (portHoppingInterval) {
+    params.push(`port-hopping-interval=${encodeSurgeValue(portHoppingInterval)}`);
+  }
+
+  return {
+    type: "hysteria2",
+    name,
+    line: `${name} = hysteria2, ${host}, ${proxyPort}, ${params.join(", ")}`
+  };
+}
+
 function convertSubscription(content, options) {
   const body = detectSubscriptionBody(content);
   const lines = splitLines(body);
   const warnings = [];
   const proxies = [];
   const usedNames = new Set();
+  let skippedMetaEntries = 0;
+  let unsupportedLines = 0;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -306,7 +421,9 @@ function convertSubscription(content, options) {
         parsed = parseShadowsocksUri(line, options);
       } else if (line.indexOf("trojan://") === 0) {
         parsed = parseTrojanUri(line, options);
-      } else if (line.indexOf(" = ") > 0 && /(vmess|ss|trojan),/.test(line)) {
+      } else if (line.indexOf("hy2://") === 0 || line.indexOf("hysteria2://") === 0) {
+        parsed = parseHysteria2Uri(line);
+      } else if (line.indexOf(" = ") > 0 && /(vmess|ss|trojan|hysteria2),/.test(line)) {
         parsed = {
           type: "surge",
           name: line.split(" = ")[0].trim(),
@@ -315,6 +432,7 @@ function convertSubscription(content, options) {
       }
 
       if (!parsed) {
+        unsupportedLines += 1;
         if (options.keepUnsupported) {
           warnings.push(`Skipped unsupported line: ${line.slice(0, 80)}`);
         }
@@ -322,6 +440,7 @@ function convertSubscription(content, options) {
       }
 
       if (options.skipMetaEntries && looksLikeMetaNode(parsed.name)) {
+        skippedMetaEntries += 1;
         continue;
       }
 
@@ -350,7 +469,12 @@ function convertSubscription(content, options) {
   return {
     result: `${header}\n${proxies.map((item) => item.line).join("\n")}\n`,
     proxies,
-    warnings
+    warnings,
+    sourceStats: {
+      inputTotal: lines.length,
+      skippedMetaEntries,
+      unsupportedLines
+    }
   };
 }
 
@@ -415,8 +539,38 @@ function json(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
+function text(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "no-store"
+  });
+  res.end(payload);
+}
+
+function buildPublicSubscriptionUrl(req, options) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const url = new URL("/sub", `${proto}://${host}`);
+
+  url.searchParams.set("url", options.subscriptionUrl);
+  url.searchParams.set("forceTrojanWs", String(Boolean(options.forceTrojanWs)));
+  url.searchParams.set("trojanWsPath", options.trojanWsPath || "/images");
+  url.searchParams.set("trojanWsHostMode", options.trojanWsHostMode || "peer");
+  if (options.trojanWsHost) {
+    url.searchParams.set("trojanWsHost", options.trojanWsHost);
+  }
+  if (options.trojanSniOverride) {
+    url.searchParams.set("trojanSniOverride", options.trojanSniOverride);
+  }
+  url.searchParams.set("enableUdpRelay", String(Boolean(options.enableUdpRelay)));
+  url.searchParams.set("skipMetaEntries", String(Boolean(options.skipMetaEntries)));
+
+  return url.toString();
+}
+
 async function serveStatic(req, res) {
-  const target = req.url === "/" ? "/index.html" : req.url;
+  const requestUrl = new URL(req.url, "http://127.0.0.1");
+  const target = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
   const filePath = path.join(publicDir, decodeURIComponent(target));
 
   if (!filePath.startsWith(publicDir)) {
@@ -448,24 +602,29 @@ process.on("unhandledRejection", (error) => {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/health") {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+
+    if (req.method === "GET" && requestUrl.pathname === "/health") {
       json(res, 200, { ok: true });
       return;
     }
 
-    if (req.method === "POST" && req.url === "/api/convert") {
+    if (req.method === "GET" && requestUrl.pathname === "/sub") {
+      const options = buildOptions(Object.fromEntries(requestUrl.searchParams.entries()), "query");
+      if (!options.subscriptionUrl) {
+        text(res, 400, "# Error\n# Missing url query parameter.\n");
+        return;
+      }
+
+      const sourceText = await fetchSubscription(options.subscriptionUrl);
+      const converted = convertSubscription(sourceText, options);
+      text(res, 200, converted.result);
+      return;
+    }
+
+    if (req.method === "POST" && requestUrl.pathname === "/api/convert") {
       const body = await parseJsonBody(req);
-      const options = {
-        subscriptionUrl: body.subscriptionUrl || "",
-        forceTrojanWs: Boolean(body.forceTrojanWs),
-        trojanWsPath: body.trojanWsPath || "/images",
-        trojanWsHost: body.trojanWsHost || "",
-        trojanWsHostMode: body.trojanWsHostMode || "peer",
-        trojanSniOverride: body.trojanSniOverride || "",
-        keepUnsupported: Boolean(body.keepUnsupported),
-        skipMetaEntries: body.skipMetaEntries !== false,
-        enableUdpRelay: body.enableUdpRelay !== false
-      };
+      const options = buildOptions(body, "body");
 
       let sourceText = body.rawContent || "";
       if (!sourceText && body.subscriptionUrl) {
@@ -482,10 +641,15 @@ const server = http.createServer(async (req, res) => {
         ...converted,
         stats: {
           total: converted.proxies.length,
+          inputTotal: converted.sourceStats.inputTotal,
+          skippedMetaEntries: converted.sourceStats.skippedMetaEntries,
+          unsupportedLines: converted.sourceStats.unsupportedLines,
           vmess: converted.proxies.filter((item) => item.type === "vmess").length,
           ss: converted.proxies.filter((item) => item.type === "ss").length,
-          trojan: converted.proxies.filter((item) => item.type === "trojan").length
-        }
+          trojan: converted.proxies.filter((item) => item.type === "trojan").length,
+          hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
+        },
+        generatedUrl: options.subscriptionUrl ? buildPublicSubscriptionUrl(req, options) : ""
       });
       return;
     }

@@ -44,7 +44,7 @@
         <form id="convert-form" class="panel form-panel">
           <div class="section-head">
             <h2>订阅输入</h2>
-            <p>你可以粘贴订阅链接，或者直接贴原始订阅内容。</p>
+            <p>输入原始订阅链接，生成一个新的可直接替换的转换链接，并预览最终的 Surge 输出。</p>
           </div>
 
           <label class="field">
@@ -57,15 +57,27 @@
             />
           </label>
 
+          <div class="section-head compact">
+            <h2>新的订阅 URL</h2>
+            <p>把下面生成的新链接填回 Surge，就能自动拉取并转换原始订阅。</p>
+          </div>
+
           <label class="field">
-            <span>原始内容</span>
-            <textarea
-              id="raw-content"
-              name="raw-content"
-              rows="6"
-              placeholder="可选。适合调试 base64 内容或手工粘贴 vmess://、ss://、trojan:// 列表。"
-            ></textarea>
+            <span>替换后的 URL</span>
+            <input
+              id="generated-url"
+              name="generated-url"
+              type="text"
+              readonly
+              placeholder="先输入原始订阅链接，再点击生成新的 URL"
+            />
           </label>
+
+          <div class="actions compact-actions">
+            <button class="ghost" id="generate-link" type="button">生成新 URL</button>
+            <button class="ghost" id="copy-link" type="button">复制新 URL</button>
+            <button class="ghost" id="open-link" type="button">打开新 URL</button>
+          </div>
 
           <div class="section-head compact">
             <h2>Trojan 修补</h2>
@@ -128,6 +140,10 @@
               <strong id="metric-total">0</strong>
             </div>
             <div class="metric-card">
+              <span>Input</span>
+              <strong id="metric-input">0</strong>
+            </div>
+            <div class="metric-card">
               <span>VMess</span>
               <strong id="metric-vmess">0</strong>
             </div>
@@ -138,6 +154,10 @@
             <div class="metric-card">
               <span>Trojan</span>
               <strong id="metric-trojan">0</strong>
+            </div>
+            <div class="metric-card">
+              <span>Hysteria2</span>
+              <strong id="metric-hysteria2">0</strong>
             </div>
           </div>
 

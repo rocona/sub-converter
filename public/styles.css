@@ -236,6 +236,11 @@ textarea {
   margin-top: 10px;
 }
 
+.compact-actions {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
 button {
   border: none;
   border-radius: 999px;
@@ -261,7 +266,7 @@ button.ghost {
 }
 
 .metrics {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   margin: 18px 0;
 }
 
