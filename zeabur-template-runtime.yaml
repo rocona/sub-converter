@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://schema.zeabur.app/template.json
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: Sub Converter Runtime
+spec:
+  description: |
+    Runtime-based deployment for the Surge subscription converter.
+    The container pulls the latest GitHub source on startup and serves the app without using Zeabur's source builder.
+  tags:
+    - Proxy
+    - Utility
+  readme: |
+    # Sub Converter Runtime
+
+    This template runs the subscription converter from the latest GitHub `main` branch at container startup.
+  variables: []
+  services:
+    - name: sub-converter-runtime
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: node:20-alpine
+          command:
+            - /bin/sh
+            - -lc
+            - /opt/subcon/start.sh
+        ports:
+          - id: web
+            port: 3001
+            type: HTTP
+        healthCheck:
+          type: TCP
+          port: web
+        configs:
+          - path: /opt/subcon/start.sh
+            permission: 493
+            envsubst: false
+            template: |
+              #!/bin/sh
+              set -eu
+
+              apk add --no-cache git >/dev/null
+              rm -rf /work/sub-converter
+              git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO}" /work/sub-converter
+              cd /work/sub-converter
+
+              if [ -f package-lock.json ]; then
+                npm ci --omit=dev
+              elif [ -f package.json ]; then
+                npm install --omit=dev
+              fi
+
+              exec node server.js
+        env:
+          GIT_REPO:
+            default: https://github.com/rocona/sub-converter.git
+          GIT_REF:
+            default: main
+          PORT:
+            default: "3001"
+          DEFAULT_SUBSCRIPTION_URL:
+            default: ""
+          DEFAULT_SUBSCRIPTION_LABEL:
+            default: "服务端默认订阅"
+          DEFAULT_FORCE_TROJAN_WS:
+            default: "true"
+          DEFAULT_TROJAN_WS_PATH:
+            default: "/images"
+          DEFAULT_TROJAN_WS_HOST_MODE:
+            default: "custom"
+          DEFAULT_TROJAN_WS_HOST:
+            default: "fast.usfaster.top"
+          DEFAULT_TROJAN_SNI_OVERRIDE:
+            default: ""
+          DEFAULT_SKIP_META_ENTRIES:
+            default: "true"
+          DEFAULT_ENABLE_UDP_RELAY:
+            default: "true"

@@ -14,163 +14,42 @@
   </head>
   <body>
     <div class="backdrop"></div>
-    <main class="shell">
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Surge Converter</p>
-          <h1>把通用订阅转换成可直接落地的 Surge 配置</h1>
-          <p class="summary">
-            面向 vmess、ss、trojan 的通用转换器，支持对有问题的 Trojan 节点统一补全
-            WebSocket 参数，适合放到 GitHub 后再交给 Zeabur 持续部署。
-          </p>
-        </div>
-        <div class="hero-card">
-          <div class="stat">
-            <span>输出目标</span>
-            <strong>Surge [Proxy]</strong>
-          </div>
-          <div class="stat">
-            <span>重点修复</span>
-            <strong>Trojan + WebSocket</strong>
-          </div>
-          <div class="stat">
-            <span>部署方式</span>
-            <strong>GitHub → Zeabur</strong>
-          </div>
-        </div>
-      </section>
+    <main class="shell compact-shell">
+      <section class="panel self-panel">
+        <p class="eyebrow">Self Use</p>
+        <h1>订阅替换</h1>
+        <p class="summary">
+          页面已经内置默认转换规则，不需要填写参数。直接复制新的订阅 URL，替换回 Surge 即可。
+        </p>
 
-      <section class="workspace">
-        <form id="convert-form" class="panel form-panel">
-          <div class="section-head">
-            <h2>订阅输入</h2>
-            <p>输入原始订阅链接，生成一个新的可直接替换的转换链接，并预览最终的 Surge 输出。</p>
-          </div>
-
+        <div class="simple-stack">
           <label class="field">
-            <span>订阅链接</span>
+            <span>原始订阅</span>
             <input
-              id="subscription-url"
-              name="subscription-url"
-              type="url"
-              placeholder="https://example.com/api/v1/client/subscribe?token=..."
-            />
-          </label>
-
-          <div class="section-head compact">
-            <h2>新的订阅 URL</h2>
-            <p>把下面生成的新链接填回 Surge，就能自动拉取并转换原始订阅。</p>
-          </div>
-
-          <label class="field">
-            <span>替换后的 URL</span>
-            <input
-              id="generated-url"
-              name="generated-url"
+              id="source-display"
               type="text"
               readonly
-              placeholder="先输入原始订阅链接，再点击生成新的 URL"
+              placeholder="服务端默认订阅"
             />
           </label>
 
-          <div class="actions compact-actions">
-            <button class="ghost" id="generate-link" type="button">生成新 URL</button>
-            <button class="ghost" id="copy-link" type="button">复制新 URL</button>
-            <button class="ghost" id="open-link" type="button">打开新 URL</button>
-          </div>
-
-          <div class="section-head compact">
-            <h2>Trojan 修补</h2>
-            <p>针对订阅没把 WebSocket 参数转换出来的情况。</p>
-          </div>
-
-          <label class="switch-row">
-            <input id="force-trojan-ws" type="checkbox" checked />
-            <span>强制为 Trojan 节点补上 WebSocket 参数</span>
+          <label class="field">
+            <span>新的订阅 URL</span>
+            <input
+              id="generated-url"
+              type="text"
+              readonly
+              placeholder="正在生成..."
+            />
           </label>
+        </div>
 
-          <div class="triple-grid">
-            <label class="field">
-              <span>WS Path</span>
-              <input id="trojan-ws-path" type="text" value="/images" />
-            </label>
+        <p id="status-text" class="status-text">正在读取默认配置...</p>
 
-            <label class="field">
-              <span>Host 取值</span>
-              <select id="trojan-ws-host-mode">
-                <option value="peer" selected>优先 peer / sni</option>
-                <option value="sni">强制跟随 SNI</option>
-                <option value="custom">使用自定义 Host</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>自定义 Host</span>
-              <input id="trojan-ws-host" type="text" value="fast.usfaster.top" />
-            </label>
-          </div>
-
-          <div class="double-grid">
-            <label class="field">
-              <span>SNI 覆盖</span>
-              <input id="trojan-sni-override" type="text" placeholder="留空则自动使用节点自身 sni / peer" />
-            </label>
-
-            <label class="switch-row subtle">
-              <input id="enable-udp-relay" type="checkbox" checked />
-              <span>为支持的协议默认附加 udp-relay=true</span>
-            </label>
-          </div>
-
-          <div class="actions">
-            <button class="primary" type="submit">开始转换</button>
-            <button class="ghost" id="fill-demo" type="button">填入当前机场示例</button>
-          </div>
-        </form>
-
-        <section class="panel output-panel">
-          <div class="section-head">
-            <h2>转换结果</h2>
-            <p id="status-text">等待输入。转换后会直接生成可粘贴到 Surge 的 [Proxy] 段。</p>
-          </div>
-
-          <div class="metrics" id="metrics">
-            <div class="metric-card">
-              <span>Total</span>
-              <strong id="metric-total">0</strong>
-            </div>
-            <div class="metric-card">
-              <span>Input</span>
-              <strong id="metric-input">0</strong>
-            </div>
-            <div class="metric-card">
-              <span>VMess</span>
-              <strong id="metric-vmess">0</strong>
-            </div>
-            <div class="metric-card">
-              <span>SS</span>
-              <strong id="metric-ss">0</strong>
-            </div>
-            <div class="metric-card">
-              <span>Trojan</span>
-              <strong id="metric-trojan">0</strong>
-            </div>
-            <div class="metric-card">
-              <span>Hysteria2</span>
-              <strong id="metric-hysteria2">0</strong>
-            </div>
-          </div>
-
-          <div class="toolbar">
-            <button class="ghost" id="copy-result" type="button">复制结果</button>
-            <button class="ghost" id="download-result" type="button">下载 .conf</button>
-          </div>
-
-          <pre id="result" class="result-block">[Proxy]
-# Converted output will appear here.</pre>
-
-          <div id="warnings" class="warnings hidden"></div>
-        </section>
+        <div class="actions">
+          <button class="primary" id="copy-link" type="button">复制新 URL</button>
+          <button class="ghost" id="open-link" type="button">打开新 URL</button>
+        </div>
       </section>
     </main>
 

@@ -8,6 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 const port = Number(process.env.PORT || process.env.ZEABUR_PORT || 3001);
+const defaultSubscriptionUrl = String(process.env.DEFAULT_SUBSCRIPTION_URL || "").trim();
+const defaultSubscriptionLabel = String(process.env.DEFAULT_SUBSCRIPTION_LABEL || "").trim();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -139,6 +141,40 @@ function normalizePortHopping(value) {
     .replace(/,/g, ";");
 }
 
+function getRequestOrigin(req) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  return `${proto}://${host}`;
+}
+
+function maskSecret(value) {
+  const text = String(value || "");
+  if (text.length <= 8) {
+    return "***";
+  }
+
+  return `${text.slice(0, 4)}...${text.slice(-4)}`;
+}
+
+function maskSubscriptionUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const url = new URL(text);
+    ["token", "key", "password", "sig", "signature", "auth"].forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.set(key, maskSecret(url.searchParams.get(key)));
+      }
+    });
+    return url.toString();
+  } catch {
+    return text.length > 32 ? `${text.slice(0, 24)}...${text.slice(-6)}` : text;
+  }
+}
+
 function buildOptions(source, mode = "body") {
   const queryMode = mode === "query";
 
@@ -161,6 +197,21 @@ function buildOptions(source, mode = "body") {
     enableUdpRelay: queryMode
       ? toBooleanWithDefault(source.enableUdpRelay, true)
       : source.enableUdpRelay !== false
+  };
+}
+
+function getDefaultOptions() {
+  return {
+    subscriptionUrl: defaultSubscriptionUrl,
+    rawContent: "",
+    forceTrojanWs: parseMaybeBoolean(process.env.DEFAULT_FORCE_TROJAN_WS) ?? true,
+    trojanWsPath: String(process.env.DEFAULT_TROJAN_WS_PATH || "/images").trim() || "/images",
+    trojanWsHost: String(process.env.DEFAULT_TROJAN_WS_HOST || "fast.usfaster.top").trim(),
+    trojanWsHostMode: String(process.env.DEFAULT_TROJAN_WS_HOST_MODE || "custom").trim() || "custom",
+    trojanSniOverride: String(process.env.DEFAULT_TROJAN_SNI_OVERRIDE || "").trim(),
+    keepUnsupported: false,
+    skipMetaEntries: parseMaybeBoolean(process.env.DEFAULT_SKIP_META_ENTRIES) ?? true,
+    enableUdpRelay: parseMaybeBoolean(process.env.DEFAULT_ENABLE_UDP_RELAY) ?? true
   };
 }
 
@@ -462,7 +513,6 @@ function convertSubscription(content, options) {
   const header = [
     "# Converted by Surge Subscription Converter",
     `# Total: ${proxies.length}`,
-    options.subscriptionUrl ? `# Source: ${options.subscriptionUrl}` : null,
     "[Proxy]"
   ].filter(Boolean).join("\n");
 
@@ -548,9 +598,7 @@ function text(res, statusCode, payload) {
 }
 
 function buildPublicSubscriptionUrl(req, options) {
-  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const url = new URL("/sub", `${proto}://${host}`);
+  const url = new URL("/sub", getRequestOrigin(req));
 
   url.searchParams.set("url", options.subscriptionUrl);
   url.searchParams.set("forceTrojanWs", String(Boolean(options.forceTrojanWs)));
@@ -566,6 +614,10 @@ function buildPublicSubscriptionUrl(req, options) {
   url.searchParams.set("skipMetaEntries", String(Boolean(options.skipMetaEntries)));
 
   return url.toString();
+}
+
+function buildDefaultPublicSubscriptionUrl(req) {
+  return new URL("/sub/default", getRequestOrigin(req)).toString();
 }
 
 async function serveStatic(req, res) {
@@ -606,6 +658,38 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && requestUrl.pathname === "/health") {
       json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/api/default") {
+      if (!defaultSubscriptionUrl) {
+        json(res, 200, {
+          configured: false,
+          sourceDisplay: "",
+          generatedUrl: "",
+          error: "Default subscription is not configured on the server."
+        });
+        return;
+      }
+
+      json(res, 200, {
+        configured: true,
+        sourceDisplay: defaultSubscriptionLabel || maskSubscriptionUrl(defaultSubscriptionUrl),
+        generatedUrl: buildDefaultPublicSubscriptionUrl(req)
+      });
+      return;
+    }
+
+    if (req.method === "GET" && requestUrl.pathname === "/sub/default") {
+      if (!defaultSubscriptionUrl) {
+        text(res, 500, "# Error\n# Default subscription is not configured on the server.\n");
+        return;
+      }
+
+      const options = getDefaultOptions();
+      const sourceText = await fetchSubscription(options.subscriptionUrl);
+      const converted = convertSubscription(sourceText, options);
+      text(res, 200, converted.result);
       return;
     }
 
