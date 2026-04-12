@@ -3,6 +3,7 @@ import https from "node:https";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,6 +105,10 @@ function detectSubscriptionBody(rawText) {
   }
 
   return text;
+}
+
+function isManagedConfig(text) {
+  return String(text || "").trim().indexOf("#!MANAGED-CONFIG") === 0;
 }
 
 function splitLines(text) {
@@ -462,7 +467,140 @@ function parseHysteria2Uri(line) {
   };
 }
 
-function convertSubscription(content, options) {
+function parseSurgeProxyDefinition(line) {
+  const match = String(line || "").match(/^\s*([^=\n]+?)\s*=\s*(vmess|ss|trojan|hysteria2)\s*,\s*(.+)\s*$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    name: match[1].trim(),
+    type: match[2].toLowerCase(),
+    tail: match[3].trim()
+  };
+}
+
+function patchTrojanSurgeLine(line, options) {
+  const parsed = parseSurgeProxyDefinition(line);
+  if (!parsed || parsed.type !== "trojan") {
+    return line;
+  }
+
+  const segments = parsed.tail.split(",").map((item) => item.trim()).filter(Boolean);
+  const base = [];
+
+  for (let i = 0; i < segments.length; i += 1) {
+    const segment = segments[i];
+    const lower = segment.toLowerCase();
+
+    if (
+      lower === "ws=true" ||
+      lower.startsWith("ws-path=") ||
+      lower.startsWith("ws-headers=")
+    ) {
+      continue;
+    }
+
+    base.push(segment);
+  }
+
+  base.push("ws=true");
+  base.push(`ws-path=${encodeSurgeValue(ensureLeadingSlash(options.trojanWsPath || "/images"))}`);
+  base.push(`ws-headers=Host: ${encodeSurgeValue(options.trojanWsHost || "fast.usfaster.top")}`);
+
+  return `${parsed.name} = trojan, ${base.join(", ")}`;
+}
+
+function rewriteManagedHeaderLine(line, managedConfigUrl) {
+  if (!managedConfigUrl) {
+    return line;
+  }
+
+  const text = String(line || "");
+  if (!text.startsWith("#!MANAGED-CONFIG ")) {
+    return line;
+  }
+
+  const rest = text.slice("#!MANAGED-CONFIG ".length).trim();
+  const firstSpace = rest.indexOf(" ");
+  const suffix = firstSpace >= 0 ? rest.slice(firstSpace) : "";
+  return `#!MANAGED-CONFIG ${managedConfigUrl}${suffix}`;
+}
+
+function convertManagedConfig(content, options, managedConfigUrl = "") {
+  const body = detectSubscriptionBody(content);
+  const lines = String(body || "").split(/\r?\n/);
+  const warnings = [];
+  const proxies = [];
+  const usedNames = new Set();
+  let skippedMetaEntries = 0;
+  let unsupportedLines = 0;
+  let currentSection = "";
+
+  const outputLines = lines.map((rawLine, index) => {
+    const sectionMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1].trim().toLowerCase();
+      return rawLine;
+    }
+
+    if (index === 0 && isManagedConfig(body)) {
+      return rewriteManagedHeaderLine(rawLine, managedConfigUrl);
+    }
+
+    if (currentSection !== "proxy") {
+      return rawLine;
+    }
+
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) {
+      return rawLine;
+    }
+
+    const parsed = parseSurgeProxyDefinition(rawLine);
+    if (!parsed) {
+      unsupportedLines += 1;
+      return rawLine;
+    }
+
+    if (options.skipMetaEntries && looksLikeMetaNode(parsed.name)) {
+      skippedMetaEntries += 1;
+      return "";
+    }
+
+    const uniqueName = makeUniqueName(parsed.name, usedNames);
+    let finalLine = rawLine.replace(/^\s*([^=\n]+?)\s*=/, `${uniqueName} =`);
+
+    if (parsed.type === "trojan" && options.forceTrojanWs) {
+      finalLine = patchTrojanSurgeLine(finalLine, options);
+    }
+
+    proxies.push({
+      name: uniqueName,
+      type: parsed.type,
+      line: finalLine
+    });
+
+    return finalLine;
+  });
+
+  return {
+    result: `${outputLines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`,
+    proxies,
+    warnings,
+    sourceStats: {
+      inputTotal: proxies.length + skippedMetaEntries,
+      skippedMetaEntries,
+      unsupportedLines
+    }
+  };
+}
+
+function convertSubscription(content, options, managedConfigUrl = "") {
+  if (isManagedConfig(detectSubscriptionBody(content))) {
+    return convertManagedConfig(content, options, managedConfigUrl);
+  }
+
   const body = detectSubscriptionBody(content);
   const lines = splitLines(body);
   const warnings = [];
@@ -560,14 +698,35 @@ function parseJsonBody(req) {
   });
 }
 
+function decodeHttpBody(buffer, encoding) {
+  const body = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
+  const normalized = String(encoding || "").trim().toLowerCase();
+
+  if (!normalized || normalized === "identity") {
+    return body;
+  }
+
+  if (normalized.includes("gzip")) {
+    return zlib.gunzipSync(body);
+  }
+
+  if (normalized.includes("deflate")) {
+    return zlib.inflateSync(body);
+  }
+
+  return body;
+}
+
 function fetchSubscription(targetUrl) {
   return new Promise((resolve, reject) => {
     const client = String(targetUrl).startsWith("https://") ? https : http;
 
     const req = client.get(targetUrl, {
       headers: {
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-        accept: "*/*"
+        "user-agent": "Surge Mac/10900",
+        accept: "*/*",
+        "accept-language": "zh-CN,zh-Hans;q=0.9",
+        "accept-encoding": "gzip, deflate"
       }
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -584,7 +743,14 @@ function fetchSubscription(targetUrl) {
 
       const chunks = [];
       res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      res.on("end", () => {
+        try {
+          const body = decodeHttpBody(Buffer.concat(chunks), res.headers["content-encoding"]);
+          resolve(body.toString("utf8"));
+        } catch (error) {
+          reject(error);
+        }
+      });
       res.on("error", reject);
     });
 
@@ -699,7 +865,8 @@ const server = http.createServer(async (req, res) => {
 
       const options = getDefaultOptions();
       const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const converted = convertSubscription(sourceText, options);
+      const managedConfigUrl = buildDefaultPublicSubscriptionUrl(req);
+      const converted = convertSubscription(sourceText, options, managedConfigUrl);
       json(res, 200, {
         ...converted,
         stats: {
@@ -712,7 +879,7 @@ const server = http.createServer(async (req, res) => {
           trojan: converted.proxies.filter((item) => item.type === "trojan").length,
           hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
         },
-        generatedUrl: buildDefaultPublicSubscriptionUrl(req)
+        generatedUrl: managedConfigUrl
       });
       return;
     }
@@ -725,7 +892,7 @@ const server = http.createServer(async (req, res) => {
 
       const options = getDefaultOptions();
       const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const converted = convertSubscription(sourceText, options);
+      const converted = convertSubscription(sourceText, options, buildDefaultPublicSubscriptionUrl(req));
       text(res, 200, converted.result);
       return;
     }
@@ -738,7 +905,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const converted = convertSubscription(sourceText, options);
+      const converted = convertSubscription(sourceText, options, buildPublicSubscriptionUrl(req, options));
       text(res, 200, converted.result);
       return;
     }
@@ -757,7 +924,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const converted = convertSubscription(sourceText, options);
+      const generatedUrl = options.subscriptionUrl ? buildPublicSubscriptionUrl(req, options) : "";
+      const converted = convertSubscription(sourceText, options, generatedUrl);
       json(res, 200, {
         ...converted,
         stats: {
@@ -770,7 +938,7 @@ const server = http.createServer(async (req, res) => {
           trojan: converted.proxies.filter((item) => item.type === "trojan").length,
           hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
         },
-        generatedUrl: options.subscriptionUrl ? buildPublicSubscriptionUrl(req, options) : ""
+        generatedUrl
       });
       return;
     }
