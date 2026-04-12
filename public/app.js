@@ -1,4 +1,5 @@
-const sourceDisplayInput = document.querySelector("#source-display");
+const form = document.querySelector("#convert-form");
+const subscriptionUrlInput = document.querySelector("#subscription-url");
 const generatedUrlInput = document.querySelector("#generated-url");
 const statusText = document.querySelector("#status-text");
 const previewStatus = document.querySelector("#preview-status");
@@ -51,51 +52,74 @@ function renderWarnings(warnings) {
   `;
 }
 
-async function loadDefaultSubscription() {
-  statusText.textContent = "正在读取默认配置...";
-
-  try {
-    const response = await fetch("/api/default", {
-      headers: {
-        accept: "application/json"
-      }
-    });
-    const data = await response.json();
-
-    if (!response.ok || !data.configured) {
-      throw new Error(data.error || "默认订阅还没有在服务端配置好。");
-    }
-
-    sourceDisplayInput.value = data.sourceDisplay || "服务端默认订阅";
-    generatedUrlInput.value = data.generatedUrl || "";
-    latestGeneratedUrl = data.generatedUrl || "";
-    statusText.textContent = "新的订阅 URL 已生成，直接复制回 Surge 即可。";
-  } catch (error) {
-    sourceDisplayInput.value = "";
-    generatedUrlInput.value = "";
-    latestGeneratedUrl = "";
-    statusText.textContent = error.message || "读取默认配置失败。";
-  }
+function buildPayload() {
+  return {
+    subscriptionUrl: subscriptionUrlInput.value.trim(),
+    forceTrojanWs: true,
+    trojanWsPath: "/images",
+    trojanWsHostMode: "custom",
+    trojanWsHost: "fast.usfaster.top",
+    trojanSniOverride: "",
+    enableUdpRelay: true,
+    skipMetaEntries: true
+  };
 }
 
-async function loadDefaultPreview() {
-  previewStatus.textContent = "正在生成默认预览...";
+function updateGeneratedUrl() {
+  const payload = buildPayload();
+  if (!payload.subscriptionUrl) {
+    latestGeneratedUrl = "";
+    generatedUrlInput.value = "";
+    return "";
+  }
+
+  const url = new URL("/sub", window.location.origin);
+  url.searchParams.set("url", payload.subscriptionUrl);
+  url.searchParams.set("forceTrojanWs", "true");
+  url.searchParams.set("trojanWsPath", payload.trojanWsPath);
+  url.searchParams.set("trojanWsHostMode", payload.trojanWsHostMode);
+  url.searchParams.set("trojanWsHost", payload.trojanWsHost);
+  url.searchParams.set("enableUdpRelay", "true");
+  url.searchParams.set("skipMetaEntries", "true");
+
+  latestGeneratedUrl = url.toString();
+  generatedUrlInput.value = latestGeneratedUrl;
+  return latestGeneratedUrl;
+}
+
+async function convertSubscription(event) {
+  event.preventDefault();
+
+  const payload = buildPayload();
+  if (!payload.subscriptionUrl) {
+    statusText.textContent = "请先粘贴原始订阅链接。";
+    previewStatus.textContent = "等待输入原始订阅链接。";
+    return;
+  }
+
+  updateGeneratedUrl();
+  statusText.textContent = "新的订阅 URL 已生成。";
+  previewStatus.textContent = "正在拉取原始订阅并生成预览...";
   resultBlock.textContent = "[Proxy]\n# Loading preview...";
   renderWarnings([]);
 
   try {
-    const response = await fetch("/api/default-preview", {
+    const response = await fetch("/api/convert", {
+      method: "POST",
       headers: {
-        accept: "application/json"
-      }
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
     });
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "默认预览生成失败。");
+      throw new Error(data.error || "转换失败。");
     }
 
     latestResult = data.result || "[Proxy]\n";
+    latestGeneratedUrl = data.generatedUrl || latestGeneratedUrl;
+    generatedUrlInput.value = latestGeneratedUrl;
     resultBlock.textContent = latestResult;
     setMetrics(data.stats);
     renderWarnings(data.warnings);
@@ -105,27 +129,36 @@ async function loadDefaultPreview() {
     resultBlock.textContent = `[Proxy]\n# Error\n# ${error.message}`;
     setMetrics();
     renderWarnings([error.message]);
-    previewStatus.textContent = "默认预览生成失败。";
+    previewStatus.textContent = "转换结果预览失败。";
   }
 }
 
+subscriptionUrlInput.addEventListener("input", () => {
+  updateGeneratedUrl();
+  if (!subscriptionUrlInput.value.trim()) {
+    statusText.textContent = "等待输入原始订阅链接。";
+  }
+});
+
 copyLinkButton.addEventListener("click", async () => {
-  if (!latestGeneratedUrl) {
-    statusText.textContent = "新的订阅 URL 还没有准备好。";
+  const generatedUrl = updateGeneratedUrl();
+  if (!generatedUrl) {
+    statusText.textContent = "请先粘贴原始订阅链接。";
     return;
   }
 
-  await navigator.clipboard.writeText(latestGeneratedUrl);
+  await navigator.clipboard.writeText(generatedUrl);
   statusText.textContent = "新的订阅 URL 已复制到剪贴板。";
 });
 
 openLinkButton.addEventListener("click", () => {
-  if (!latestGeneratedUrl) {
-    statusText.textContent = "新的订阅 URL 还没有准备好。";
+  const generatedUrl = updateGeneratedUrl();
+  if (!generatedUrl) {
+    statusText.textContent = "请先粘贴原始订阅链接。";
     return;
   }
 
-  window.open(latestGeneratedUrl, "_blank", "noopener,noreferrer");
+  window.open(generatedUrl, "_blank", "noopener,noreferrer");
 });
 
 copyResultButton.addEventListener("click", async () => {
@@ -144,5 +177,4 @@ downloadResultButton.addEventListener("click", () => {
   previewStatus.textContent = "已生成下载文件。";
 });
 
-await loadDefaultSubscription();
-await loadDefaultPreview();
+form.addEventListener("submit", convertSubscription);

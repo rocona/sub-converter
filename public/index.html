@@ -16,21 +16,21 @@
     <div class="backdrop"></div>
     <main class="shell compact-shell">
       <div class="page-stack">
-        <section class="panel self-panel">
+        <form class="panel self-panel" id="convert-form">
           <p class="eyebrow">Self Use</p>
           <h1>订阅替换</h1>
           <p class="summary">
-            页面已经内置默认转换规则，不需要填写参数。直接复制新的订阅 URL，替换回 Surge 即可。
+            粘贴原始订阅链接，页面会按当前内置规则生成新的订阅 URL，并在下方预览转换结果。
           </p>
 
           <div class="simple-stack">
             <label class="field">
               <span>原始订阅</span>
               <input
-                id="source-display"
-                type="text"
-                readonly
-                placeholder="服务端默认订阅"
+                id="subscription-url"
+                type="url"
+                placeholder="https://example.com/api/v1/client/subscribe?token=..."
+                autocomplete="off"
               />
             </label>
 
@@ -40,18 +40,19 @@
                 id="generated-url"
                 type="text"
                 readonly
-                placeholder="正在生成..."
+                placeholder="先粘贴原始订阅链接，再生成新的 URL"
               />
             </label>
           </div>
 
-          <p id="status-text" class="status-text">正在读取默认配置...</p>
+          <p id="status-text" class="status-text">等待输入原始订阅链接。</p>
 
           <div class="actions">
-            <button class="primary" id="copy-link" type="button">复制新 URL</button>
+            <button class="primary" type="submit">生成并预览</button>
+            <button class="ghost" id="copy-link" type="button">复制新 URL</button>
             <button class="ghost" id="open-link" type="button">打开新 URL</button>
           </div>
-        </section>
+        </form>
 
         <section class="panel output-panel">
           <div class="section-head">
