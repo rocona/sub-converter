@@ -10,4 +10,4 @@ npm run dev
 
 Then open `http://127.0.0.1:3000`.
 
-In cloud environments, the service follows `PORT` and falls back to `8080`.
+In cloud environments, the service follows `PORT` and falls back to `3001`.
