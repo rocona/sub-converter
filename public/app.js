@@ -60,8 +60,8 @@ function buildPayload() {
     trojanWsHostMode: "custom",
     trojanWsHost: "fast.usfaster.top",
     trojanSniOverride: "",
-    enableUdpRelay: true,
-    skipMetaEntries: true
+    enableUdpRelay: false,
+    skipMetaEntries: false
   };
 }
 
@@ -79,8 +79,8 @@ function updateGeneratedUrl() {
   url.searchParams.set("trojanWsPath", payload.trojanWsPath);
   url.searchParams.set("trojanWsHostMode", payload.trojanWsHostMode);
   url.searchParams.set("trojanWsHost", payload.trojanWsHost);
-  url.searchParams.set("enableUdpRelay", "true");
-  url.searchParams.set("skipMetaEntries", "true");
+  url.searchParams.set("enableUdpRelay", "false");
+  url.searchParams.set("skipMetaEntries", "false");
 
   latestGeneratedUrl = url.toString();
   generatedUrlInput.value = latestGeneratedUrl;

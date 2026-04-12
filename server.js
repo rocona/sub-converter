@@ -192,11 +192,11 @@ function buildOptions(source, mode = "body") {
       ? toBooleanWithDefault(source.keepUnsupported, false)
       : Boolean(source.keepUnsupported),
     skipMetaEntries: queryMode
-      ? toBooleanWithDefault(source.skipMetaEntries, true)
-      : source.skipMetaEntries !== false,
+      ? toBooleanWithDefault(source.skipMetaEntries, false)
+      : Boolean(source.skipMetaEntries),
     enableUdpRelay: queryMode
-      ? toBooleanWithDefault(source.enableUdpRelay, true)
-      : source.enableUdpRelay !== false
+      ? toBooleanWithDefault(source.enableUdpRelay, false)
+      : Boolean(source.enableUdpRelay)
   };
 }
 
@@ -210,8 +210,8 @@ function getDefaultOptions() {
     trojanWsHostMode: String(process.env.DEFAULT_TROJAN_WS_HOST_MODE || "custom").trim() || "custom",
     trojanSniOverride: String(process.env.DEFAULT_TROJAN_SNI_OVERRIDE || "").trim(),
     keepUnsupported: false,
-    skipMetaEntries: parseMaybeBoolean(process.env.DEFAULT_SKIP_META_ENTRIES) ?? true,
-    enableUdpRelay: parseMaybeBoolean(process.env.DEFAULT_ENABLE_UDP_RELAY) ?? true
+    skipMetaEntries: parseMaybeBoolean(process.env.DEFAULT_SKIP_META_ENTRIES) ?? false,
+    enableUdpRelay: parseMaybeBoolean(process.env.DEFAULT_ENABLE_UDP_RELAY) ?? false
   };
 }
 
@@ -359,20 +359,31 @@ function parseTrojanUri(line, options) {
   const password = decodeURIComponent(url.username || "");
   const sni = options.trojanSniOverride || queryValue(searchParams, "sni") || queryValue(searchParams, "peer") || host;
   const params = [
-    `password=${encodeSurgeValue(password)}`,
-    `sni=${encodeSurgeValue(sni)}`,
-    `skip-cert-verify=${parseMaybeBoolean(queryValue(searchParams, "allowInsecure")) === true}`
+    `password=${encodeSurgeValue(password)}`
   ];
 
-  const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
-  const shouldEnableWs = options.forceTrojanWs || network === "ws" || network === "websocket";
+  if (sni) {
+    params.push(`sni=${encodeSurgeValue(sni)}`);
+  }
 
-  if (shouldEnableWs) {
-    const wsPath = ensureLeadingSlash(queryValue(searchParams, "path") || options.trojanWsPath || "/images");
-    const wsHost = resolveTrojanWsHost(searchParams, options, host);
+  if (options.forceTrojanWs) {
     params.push("ws=true");
-    params.push(`ws-path=${encodeSurgeValue(wsPath)}`);
-    params.push(`ws-headers=Host: ${encodeSurgeValue(wsHost)}`);
+    params.push(`ws-path=${encodeSurgeValue(ensureLeadingSlash(options.trojanWsPath || "/images"))}`);
+    params.push(`ws-headers=Host: ${encodeSurgeValue(options.trojanWsHost || "fast.usfaster.top")}`);
+  } else {
+    const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
+    if (network === "ws" || network === "websocket") {
+      const wsPath = ensureLeadingSlash(queryValue(searchParams, "path") || options.trojanWsPath || "/images");
+      const wsHost = resolveTrojanWsHost(searchParams, options, host);
+      params.push("ws=true");
+      params.push(`ws-path=${encodeSurgeValue(wsPath)}`);
+      params.push(`ws-headers=Host: ${encodeSurgeValue(wsHost)}`);
+    }
+  }
+
+  const skipCertVerify = parseMaybeBoolean(queryValue(searchParams, "allowInsecure"));
+  if (skipCertVerify === true) {
+    params.push("skip-cert-verify=true");
   }
 
   if (options.enableUdpRelay) {
