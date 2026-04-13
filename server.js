@@ -659,26 +659,10 @@ function convertSubscription(content, options, managedConfigUrl = "") {
     }
   }
 
-  const header = [
-    "# Converted by Surge Subscription Converter",
-    `# Total: ${proxies.length}`,
-    "[Proxy]"
-  ].filter(Boolean).join("\n");
-
   const proxySection = proxies.map((item) => item.line).join("\n");
-  const proxyGroupSection = [
-    "[Proxy Group]",
-    proxies.length > 0
-      ? `Proxy = select, ${proxies.map((item) => item.name).join(", ")}`
-      : "Proxy = select"
-  ].join("\n");
-  const ruleSection = [
-    "[Rule]",
-    "FINAL,Proxy"
-  ].join("\n");
 
   return {
-    result: `${header}\n${proxySection}\n\n${proxyGroupSection}\n\n${ruleSection}\n`,
+    result: `${proxySection}\n`,
     proxies,
     warnings,
     sourceStats: {
