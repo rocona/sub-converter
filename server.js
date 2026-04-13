@@ -355,6 +355,19 @@ function resolveTrojanWsHost(searchParams, options, fallbackHost) {
   return peer || sni || options.trojanWsHost || fallbackHost;
 }
 
+function trojanUriHasWsConfigParams(searchParams) {
+  const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
+  return (
+    network === "ws" ||
+    network === "websocket" ||
+    searchParams.has("path") ||
+    searchParams.has("host") ||
+    searchParams.has("ws") ||
+    searchParams.has("wsHost") ||
+    searchParams.has("wsPath")
+  );
+}
+
 function parseTrojanUri(line, options) {
   const url = new URL(line);
   const searchParams = url.searchParams;
@@ -363,6 +376,7 @@ function parseTrojanUri(line, options) {
   const proxyPort = Number(url.port);
   const password = decodeURIComponent(url.username || "");
   const sni = options.trojanSniOverride || queryValue(searchParams, "sni") || queryValue(searchParams, "peer") || host;
+  const hasWsConfigParams = trojanUriHasWsConfigParams(searchParams);
   const params = [
     `password=${encodeSurgeValue(password)}`
   ];
@@ -371,7 +385,7 @@ function parseTrojanUri(line, options) {
     params.push(`sni=${encodeSurgeValue(sni)}`);
   }
 
-  if (options.forceTrojanWs) {
+  if (options.forceTrojanWs && hasWsConfigParams) {
     params.push("ws=true");
     params.push(`ws-path=${encodeSurgeValue(ensureLeadingSlash(options.trojanWsPath || "/images"))}`);
     params.push(`ws-headers=Host: ${encodeSurgeValue(options.trojanWsHost || "fast.usfaster.top")}`);
@@ -487,6 +501,13 @@ function patchTrojanSurgeLine(line, options) {
   }
 
   const segments = parsed.tail.split(",").map((item) => item.trim()).filter(Boolean);
+  const hasWsHints = segments.some((segment) => {
+    const lower = segment.toLowerCase();
+    return lower === "ws=true" || lower.startsWith("ws-path=") || lower.startsWith("ws-headers=");
+  });
+  if (!hasWsHints) {
+    return line;
+  }
   const base = [];
 
   for (let i = 0; i < segments.length; i += 1) {
