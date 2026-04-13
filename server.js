@@ -665,8 +665,20 @@ function convertSubscription(content, options, managedConfigUrl = "") {
     "[Proxy]"
   ].filter(Boolean).join("\n");
 
+  const proxySection = proxies.map((item) => item.line).join("\n");
+  const proxyGroupSection = [
+    "[Proxy Group]",
+    proxies.length > 0
+      ? `Proxy = select, ${proxies.map((item) => item.name).join(", ")}`
+      : "Proxy = select"
+  ].join("\n");
+  const ruleSection = [
+    "[Rule]",
+    "FINAL,Proxy"
+  ].join("\n");
+
   return {
-    result: `${header}\n${proxies.map((item) => item.line).join("\n")}\n`,
+    result: `${header}\n${proxySection}\n\n${proxyGroupSection}\n\n${ruleSection}\n`,
     proxies,
     warnings,
     sourceStats: {
