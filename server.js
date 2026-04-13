@@ -9,8 +9,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 const port = Number(process.env.PORT || process.env.ZEABUR_PORT || 3001);
-const defaultSubscriptionUrl = String(process.env.DEFAULT_SUBSCRIPTION_URL || "").trim();
-const defaultSubscriptionLabel = String(process.env.DEFAULT_SUBSCRIPTION_LABEL || "").trim();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -146,77 +144,13 @@ function normalizePortHopping(value) {
     .replace(/,/g, ";");
 }
 
-function getRequestOrigin(req) {
-  const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  return `${proto}://${host}`;
-}
-
-function maskSecret(value) {
-  const text = String(value || "");
-  if (text.length <= 8) {
-    return "***";
-  }
-
-  return `${text.slice(0, 4)}...${text.slice(-4)}`;
-}
-
-function maskSubscriptionUrl(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-
-  try {
-    const url = new URL(text);
-    ["token", "key", "password", "sig", "signature", "auth"].forEach((key) => {
-      if (url.searchParams.has(key)) {
-        url.searchParams.set(key, maskSecret(url.searchParams.get(key)));
-      }
-    });
-    return url.toString();
-  } catch {
-    return text.length > 32 ? `${text.slice(0, 24)}...${text.slice(-6)}` : text;
-  }
-}
-
-function buildOptions(source, mode = "body") {
-  const queryMode = mode === "query";
-
+function buildOptions(source) {
   return {
     subscriptionUrl: firstDefinedValue([source.subscriptionUrl, source.url]),
     rawContent: firstDefinedValue([source.rawContent]),
-    forceTrojanWs: queryMode
-      ? toBooleanWithDefault(source.forceTrojanWs, true)
-      : Boolean(source.forceTrojanWs),
-    trojanWsPath: firstDefinedValue([source.trojanWsPath, source.wsPath]) || "/images",
-    trojanWsHost: firstDefinedValue([source.trojanWsHost, source.wsHost]),
-    trojanWsHostMode: firstDefinedValue([source.trojanWsHostMode, source.wsHostMode]) || "peer",
-    trojanSniOverride: firstDefinedValue([source.trojanSniOverride]),
-    keepUnsupported: queryMode
-      ? toBooleanWithDefault(source.keepUnsupported, false)
-      : Boolean(source.keepUnsupported),
-    skipMetaEntries: queryMode
-      ? toBooleanWithDefault(source.skipMetaEntries, false)
-      : Boolean(source.skipMetaEntries),
-    enableUdpRelay: queryMode
-      ? toBooleanWithDefault(source.enableUdpRelay, false)
-      : Boolean(source.enableUdpRelay)
-  };
-}
-
-function getDefaultOptions() {
-  return {
-    subscriptionUrl: defaultSubscriptionUrl,
-    rawContent: "",
-    forceTrojanWs: parseMaybeBoolean(process.env.DEFAULT_FORCE_TROJAN_WS) ?? true,
-    trojanWsPath: String(process.env.DEFAULT_TROJAN_WS_PATH || "/images").trim() || "/images",
-    trojanWsHost: String(process.env.DEFAULT_TROJAN_WS_HOST || "fast.usfaster.top").trim(),
-    trojanWsHostMode: String(process.env.DEFAULT_TROJAN_WS_HOST_MODE || "custom").trim() || "custom",
-    trojanSniOverride: String(process.env.DEFAULT_TROJAN_SNI_OVERRIDE || "").trim(),
-    keepUnsupported: false,
-    skipMetaEntries: parseMaybeBoolean(process.env.DEFAULT_SKIP_META_ENTRIES) ?? false,
-    enableUdpRelay: parseMaybeBoolean(process.env.DEFAULT_ENABLE_UDP_RELAY) ?? false
+    keepUnsupported: Boolean(source.keepUnsupported),
+    skipMetaEntries: toBooleanWithDefault(source.skipMetaEntries, false),
+    enableUdpRelay: toBooleanWithDefault(source.enableUdpRelay, false)
   };
 }
 
@@ -339,33 +273,14 @@ function parseShadowsocksUri(line, options) {
   };
 }
 
-function resolveTrojanWsHost(searchParams, options, fallbackHost) {
-  const mode = options.trojanWsHostMode || "peer";
-  const peer = queryValue(searchParams, "peer");
-  const sni = queryValue(searchParams, "sni");
-
-  if (mode === "custom" && options.trojanWsHost) {
-    return options.trojanWsHost;
-  }
-
-  if (mode === "sni") {
-    return options.trojanSniOverride || sni || peer || fallbackHost;
-  }
-
-  return peer || sni || options.trojanWsHost || fallbackHost;
-}
-
-function trojanUriHasWsConfigParams(searchParams) {
-  const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
-  return (
-    network === "ws" ||
-    network === "websocket" ||
-    searchParams.has("path") ||
-    searchParams.has("host") ||
-    searchParams.has("ws") ||
-    searchParams.has("wsHost") ||
-    searchParams.has("wsPath")
-  );
+function resolveTrojanWsHost(searchParams, fallbackHost) {
+  return firstDefinedValue([
+    queryValue(searchParams, "host"),
+    queryValue(searchParams, "wsHost"),
+    queryValue(searchParams, "peer"),
+    queryValue(searchParams, "sni"),
+    fallbackHost
+  ]);
 }
 
 function parseTrojanUri(line, options) {
@@ -375,8 +290,7 @@ function parseTrojanUri(line, options) {
   const host = url.hostname;
   const proxyPort = Number(url.port);
   const password = decodeURIComponent(url.username || "");
-  const sni = options.trojanSniOverride || queryValue(searchParams, "sni") || queryValue(searchParams, "peer") || host;
-  const hasWsConfigParams = trojanUriHasWsConfigParams(searchParams);
+  const sni = queryValue(searchParams, "sni") || queryValue(searchParams, "peer") || host;
   const params = [
     `password=${encodeSurgeValue(password)}`
   ];
@@ -385,19 +299,13 @@ function parseTrojanUri(line, options) {
     params.push(`sni=${encodeSurgeValue(sni)}`);
   }
 
-  if (options.forceTrojanWs && hasWsConfigParams) {
+  const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
+  if (network === "ws" || network === "websocket") {
+    const wsPath = ensureLeadingSlash(queryValue(searchParams, "path") || queryValue(searchParams, "wsPath") || "/");
+    const wsHost = resolveTrojanWsHost(searchParams, host);
     params.push("ws=true");
-    params.push(`ws-path=${encodeSurgeValue(ensureLeadingSlash(options.trojanWsPath || "/images"))}`);
-    params.push(`ws-headers=Host: ${encodeSurgeValue(options.trojanWsHost || "fast.usfaster.top")}`);
-  } else {
-    const network = String(queryValue(searchParams, "type") || queryValue(searchParams, "network")).toLowerCase();
-    if (network === "ws" || network === "websocket") {
-      const wsPath = ensureLeadingSlash(queryValue(searchParams, "path") || options.trojanWsPath || "/images");
-      const wsHost = resolveTrojanWsHost(searchParams, options, host);
-      params.push("ws=true");
-      params.push(`ws-path=${encodeSurgeValue(wsPath)}`);
-      params.push(`ws-headers=Host: ${encodeSurgeValue(wsHost)}`);
-    }
+    params.push(`ws-path=${encodeSurgeValue(wsPath)}`);
+    params.push(`ws-headers=Host: ${encodeSurgeValue(wsHost)}`);
   }
 
   const skipCertVerify = parseMaybeBoolean(queryValue(searchParams, "allowInsecure"));
@@ -494,61 +402,7 @@ function parseSurgeProxyDefinition(line) {
   };
 }
 
-function patchTrojanSurgeLine(line, options) {
-  const parsed = parseSurgeProxyDefinition(line);
-  if (!parsed || parsed.type !== "trojan") {
-    return line;
-  }
-
-  const segments = parsed.tail.split(",").map((item) => item.trim()).filter(Boolean);
-  const hasWsHints = segments.some((segment) => {
-    const lower = segment.toLowerCase();
-    return lower === "ws=true" || lower.startsWith("ws-path=") || lower.startsWith("ws-headers=");
-  });
-  if (!hasWsHints) {
-    return line;
-  }
-  const base = [];
-
-  for (let i = 0; i < segments.length; i += 1) {
-    const segment = segments[i];
-    const lower = segment.toLowerCase();
-
-    if (
-      lower === "ws=true" ||
-      lower.startsWith("ws-path=") ||
-      lower.startsWith("ws-headers=")
-    ) {
-      continue;
-    }
-
-    base.push(segment);
-  }
-
-  base.push("ws=true");
-  base.push(`ws-path=${encodeSurgeValue(ensureLeadingSlash(options.trojanWsPath || "/images"))}`);
-  base.push(`ws-headers=Host: ${encodeSurgeValue(options.trojanWsHost || "fast.usfaster.top")}`);
-
-  return `${parsed.name} = trojan, ${base.join(", ")}`;
-}
-
-function rewriteManagedHeaderLine(line, managedConfigUrl) {
-  if (!managedConfigUrl) {
-    return line;
-  }
-
-  const text = String(line || "");
-  if (!text.startsWith("#!MANAGED-CONFIG ")) {
-    return line;
-  }
-
-  const rest = text.slice("#!MANAGED-CONFIG ".length).trim();
-  const firstSpace = rest.indexOf(" ");
-  const suffix = firstSpace >= 0 ? rest.slice(firstSpace) : "";
-  return `#!MANAGED-CONFIG ${managedConfigUrl}${suffix}`;
-}
-
-function convertManagedConfig(content, options, managedConfigUrl = "") {
+function convertManagedConfig(content, options) {
   const body = detectSubscriptionBody(content);
   const lines = String(body || "").split(/\r?\n/);
   const warnings = [];
@@ -557,7 +411,6 @@ function convertManagedConfig(content, options, managedConfigUrl = "") {
   let skippedMetaEntries = 0;
   let unsupportedLines = 0;
   let currentSection = "";
-  void managedConfigUrl;
 
   lines.forEach((rawLine, index) => {
     const sectionMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*$/);
@@ -591,11 +444,7 @@ function convertManagedConfig(content, options, managedConfigUrl = "") {
     }
 
     const uniqueName = makeUniqueName(parsed.name, usedNames);
-    let finalLine = rawLine.replace(/^\s*([^=\n]+?)\s*=/, `${uniqueName} =`);
-
-    if (parsed.type === "trojan" && options.forceTrojanWs) {
-      finalLine = patchTrojanSurgeLine(finalLine, options);
-    }
+    const finalLine = rawLine.replace(/^\s*([^=\n]+?)\s*=/, `${uniqueName} =`);
 
     proxies.push({
       name: uniqueName,
@@ -618,9 +467,9 @@ function convertManagedConfig(content, options, managedConfigUrl = "") {
   };
 }
 
-function convertSubscription(content, options, managedConfigUrl = "") {
+function convertSubscription(content, options) {
   if (isManagedConfig(detectSubscriptionBody(content))) {
-    return convertManagedConfig(content, options, managedConfigUrl);
+    return convertManagedConfig(content, options);
   }
 
   const body = detectSubscriptionBody(content);
@@ -792,29 +641,6 @@ function text(res, statusCode, payload) {
   res.end(payload);
 }
 
-function buildPublicSubscriptionUrl(req, options) {
-  const url = new URL("/sub", getRequestOrigin(req));
-
-  url.searchParams.set("url", options.subscriptionUrl);
-  url.searchParams.set("forceTrojanWs", String(Boolean(options.forceTrojanWs)));
-  url.searchParams.set("trojanWsPath", options.trojanWsPath || "/images");
-  url.searchParams.set("trojanWsHostMode", options.trojanWsHostMode || "peer");
-  if (options.trojanWsHost) {
-    url.searchParams.set("trojanWsHost", options.trojanWsHost);
-  }
-  if (options.trojanSniOverride) {
-    url.searchParams.set("trojanSniOverride", options.trojanSniOverride);
-  }
-  url.searchParams.set("enableUdpRelay", String(Boolean(options.enableUdpRelay)));
-  url.searchParams.set("skipMetaEntries", String(Boolean(options.skipMetaEntries)));
-
-  return url.toString();
-}
-
-function buildDefaultPublicSubscriptionUrl(req) {
-  return new URL("/sub/default", getRequestOrigin(req)).toString();
-}
-
 async function serveStatic(req, res) {
   const requestUrl = new URL(req.url, "http://127.0.0.1");
   const target = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
@@ -856,81 +682,9 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && requestUrl.pathname === "/api/default") {
-      if (!defaultSubscriptionUrl) {
-        json(res, 200, {
-          configured: false,
-          sourceDisplay: "",
-          generatedUrl: "",
-          error: "Default subscription is not configured on the server."
-        });
-        return;
-      }
-
-      json(res, 200, {
-        configured: true,
-        sourceDisplay: defaultSubscriptionLabel || maskSubscriptionUrl(defaultSubscriptionUrl),
-        generatedUrl: buildDefaultPublicSubscriptionUrl(req)
-      });
-      return;
-    }
-
-    if (req.method === "GET" && requestUrl.pathname === "/api/default-preview") {
-      if (!defaultSubscriptionUrl) {
-        json(res, 500, { error: "Default subscription is not configured on the server." });
-        return;
-      }
-
-      const options = getDefaultOptions();
-      const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const managedConfigUrl = buildDefaultPublicSubscriptionUrl(req);
-      const converted = convertSubscription(sourceText, options, managedConfigUrl);
-      json(res, 200, {
-        ...converted,
-        stats: {
-          total: converted.proxies.length,
-          inputTotal: converted.sourceStats.inputTotal,
-          skippedMetaEntries: converted.sourceStats.skippedMetaEntries,
-          unsupportedLines: converted.sourceStats.unsupportedLines,
-          vmess: converted.proxies.filter((item) => item.type === "vmess").length,
-          ss: converted.proxies.filter((item) => item.type === "ss").length,
-          trojan: converted.proxies.filter((item) => item.type === "trojan").length,
-          hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
-        },
-        generatedUrl: managedConfigUrl
-      });
-      return;
-    }
-
-    if (req.method === "GET" && requestUrl.pathname === "/sub/default") {
-      if (!defaultSubscriptionUrl) {
-        text(res, 500, "# Error\n# Default subscription is not configured on the server.\n");
-        return;
-      }
-
-      const options = getDefaultOptions();
-      const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const converted = convertSubscription(sourceText, options, buildDefaultPublicSubscriptionUrl(req));
-      text(res, 200, converted.result);
-      return;
-    }
-
-    if (req.method === "GET" && requestUrl.pathname === "/sub") {
-      const options = buildOptions(Object.fromEntries(requestUrl.searchParams.entries()), "query");
-      if (!options.subscriptionUrl) {
-        text(res, 400, "# Error\n# Missing url query parameter.\n");
-        return;
-      }
-
-      const sourceText = await fetchSubscription(options.subscriptionUrl);
-      const converted = convertSubscription(sourceText, options, buildPublicSubscriptionUrl(req, options));
-      text(res, 200, converted.result);
-      return;
-    }
-
     if (req.method === "POST" && requestUrl.pathname === "/api/convert") {
       const body = await parseJsonBody(req);
-      const options = buildOptions(body, "body");
+      const options = buildOptions(body);
 
       let sourceText = body.rawContent || "";
       if (!sourceText && body.subscriptionUrl) {
@@ -942,8 +696,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const generatedUrl = options.subscriptionUrl ? buildPublicSubscriptionUrl(req, options) : "";
-      const converted = convertSubscription(sourceText, options, generatedUrl);
+      const converted = convertSubscription(sourceText, options);
       json(res, 200, {
         ...converted,
         stats: {
@@ -955,8 +708,7 @@ const server = http.createServer(async (req, res) => {
           ss: converted.proxies.filter((item) => item.type === "ss").length,
           trojan: converted.proxies.filter((item) => item.type === "trojan").length,
           hysteria2: converted.proxies.filter((item) => item.type === "hysteria2").length
-        },
-        generatedUrl
+        }
       });
       return;
     }
