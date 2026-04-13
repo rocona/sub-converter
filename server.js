@@ -536,36 +536,37 @@ function convertManagedConfig(content, options, managedConfigUrl = "") {
   let skippedMetaEntries = 0;
   let unsupportedLines = 0;
   let currentSection = "";
+  void managedConfigUrl;
 
-  const outputLines = lines.map((rawLine, index) => {
+  lines.forEach((rawLine, index) => {
     const sectionMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*$/);
     if (sectionMatch) {
       currentSection = sectionMatch[1].trim().toLowerCase();
-      return rawLine;
+      return;
     }
 
     if (index === 0 && isManagedConfig(body)) {
-      return rewriteManagedHeaderLine(rawLine, managedConfigUrl);
+      return;
     }
 
     if (currentSection !== "proxy") {
-      return rawLine;
+      return;
     }
 
     const trimmed = rawLine.trim();
     if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) {
-      return rawLine;
+      return;
     }
 
     const parsed = parseSurgeProxyDefinition(rawLine);
     if (!parsed) {
       unsupportedLines += 1;
-      return rawLine;
+      return;
     }
 
     if (options.skipMetaEntries && looksLikeMetaNode(parsed.name)) {
       skippedMetaEntries += 1;
-      return "";
+      return;
     }
 
     const uniqueName = makeUniqueName(parsed.name, usedNames);
@@ -580,12 +581,12 @@ function convertManagedConfig(content, options, managedConfigUrl = "") {
       type: parsed.type,
       line: finalLine
     });
-
-    return finalLine;
   });
 
+  const proxySection = proxies.map((item) => item.line).join("\n");
+
   return {
-    result: `${outputLines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`,
+    result: `${proxySection}\n`,
     proxies,
     warnings,
     sourceStats: {
