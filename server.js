@@ -682,6 +682,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && requestUrl.pathname === "/sub") {
+      const options = buildOptions(Object.fromEntries(requestUrl.searchParams.entries()));
+      if (!options.subscriptionUrl) {
+        text(res, 400, "# Error\n# Missing url query parameter.\n");
+        return;
+      }
+
+      const sourceText = await fetchSubscription(options.subscriptionUrl);
+      const converted = convertSubscription(sourceText, options);
+      text(res, 200, converted.result);
+      return;
+    }
+
     if (req.method === "POST" && requestUrl.pathname === "/api/convert") {
       const body = await parseJsonBody(req);
       const options = buildOptions(body);
